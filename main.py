@@ -77,26 +77,47 @@ def extract_printed_date(text):
 
 
 # ---------- Column B: Location ----------
+# Tolerant patterns for the two labels (allow any whitespace/newlines inside)
+LBL_LOC   = r"Location\s*Institution\s*[/\\]\s*Block\s*[/\\]\s*Floor\s*[/\\]\s*Room"
+LBL_ASSET = r"Asset\s*Location\s*Description"
+
+
 def extract_location(text):
     """
-    Extract location code. Tries multiple patterns:
-      1. After a 'Location' label  -> capture the code on same/next line
-      2. A PMH-xxxxx-xxxxx style code anywhere
-      3. A generic AAA-NN-... code near the top of the document
+    Extract the hospital location code that sits between the labels
+    'Location Institution/Block/Floor/Room' and 'Asset Location Description'.
+
+    Handles both possible orderings (the PDF/text extractor sometimes
+    reverses column order), then falls back to less-specific patterns.
     """
+
+    # 1a. Value BETWEEN  Location Institution/...  ->  Asset Location Description
     m = re.search(
-        r"Location[^\n:：]*[:：]\s*([A-Za-z0-9][A-Za-z0-9\-/ ]*?)(?:\s{2,}|\n|$)",
-        text, re.IGNORECASE,
+        LBL_LOC + r"[\s:：]*(.*?)\s*" + LBL_ASSET,
+        text, re.IGNORECASE | re.DOTALL,
     )
     if m:
-        val = m.group(1).strip()
-        if val:
+        val = _clean(m.group(1))
+        if _looks_like_code(val):
             return val
 
+    # 1b. Value BETWEEN  Asset Location Description  ->  Location Institution/...
+    #     (handles the reversed-column case)
+    m = re.search(
+        LBL_ASSET + r"[\s:：]*(.*?)\s*" + LBL_LOC,
+        text, re.IGNORECASE | re.DOTALL,
+    )
+    if m:
+        val = _clean(m.group(1))
+        if _looks_like_code(val):
+            return val
+
+    # 2. PMH-style code anywhere in the document
     m = re.search(r"(PMH[-\s][A-Z0-9\-/]+)", text, re.IGNORECASE)
     if m:
         return m.group(1).replace(" ", "-").strip()
 
+    # 3. Generic AAA-NN-... code
     m = re.search(
         r"\b([A-Z]{2,5}-[A-Z0-9]{1,6}-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,6})*)\b",
         text,
@@ -105,6 +126,28 @@ def extract_location(text):
         return m.group(1).strip()
 
     return ""
+
+
+def _clean(val: str) -> str:
+    """Collapse whitespace and tidy spacing around dashes/slashes."""
+    val = val.strip()
+    val = re.sub(r"\s+", " ", val)
+    val = re.sub(r"\s*-\s*", "-", val)
+    val = re.sub(r"\s*/\s*", "/", val)
+    return val
+
+
+def _looks_like_code(val: str) -> bool:
+    """
+    A location code should be short and contain a digit or a dash —
+    this prevents the regex from accidentally returning a paragraph
+    of unrelated text that happens to sit between the two labels.
+    """
+    if not val:
+        return False
+    if len(val) > 60:
+        return False
+    return bool(re.search(r"[\d\-]", val))
 
 
 # ---------- Column H: Description (NOT Standard Description) ----------
