@@ -3,14 +3,18 @@ import re
 import time
 import pdfplumber
 from openpyxl import load_workbook
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from openpyxl.utils import get_column_letter
 
 # ---------- Configuration ----------
-PDF_FOLDER     = r"C:\Users\310221754\OneDrive - Philips\HA Work Order"
-EXCEL_PATH     = r"C:\Users\310221754\Desktop\py_wo\wo_excel\CM_WorkOrder.xlsx"
-PROCESSED_LOG  = r"C:\Users\310221754\Desktop\py_wo\processed.txt"
-PROCESSING_LOG = r"C:\Users\310221754\Desktop\py_wo\processing.txt"
+# PDF_FOLDER     = r"C:\Users\310221754\OneDrive - Philips\HA Work Order"
+# EXCEL_PATH     = r"C:\Users\310221754\Desktop\py_wo\wo_excel\CM_WorkOrder.xlsx"
+# PROCESSED_LOG  = r"C:\Users\310221754\Desktop\py_wo\processed.txt"
+# PROCESSING_LOG = r"C:\Users\310221754\Desktop\py_wo\processing.txt"
+PDF_FOLDER     = r"C:\Users\320163620\OneDrive - Philips\test1"
+EXCEL_PATH     = r"C:\Users\320163620\Desktop\py_wo\wo_excel\CM_WorkOrder.xlsx"
+PROCESSED_LOG  = r"C:\Users\320163620\Desktop\py_wo\processed.txt"
+PROCESSING_LOG = r"C:\Users\320163620\Desktop\py_wo\processing.txt"
 
 CHECK_INTERVAL = 5 * 60   # 5 minutes
 DEBUG          = True     # Set False to silence preview output
@@ -188,6 +192,43 @@ def extract_maint_contract_no(text):
     return None
 
 
+def cal_oncall_engineer(date_input: datetime):
+    oncallEengineer = ["Anson", "Joe", "Koster", "Zero"]
+    on_call_index = 0
+    # if date.weekday() == 1:  # check if Monday
+    #     on_call_index += 1  # rotate to next engineer if Monday
+    # if on_call_index >= len(oncallEengineer):
+    #     on_call_index = 0
+    root_date = datetime.strptime("2026/01/1", "%Y/%m/%d")
+    stripped_date_input = date_input.date()
+    time_diff = datetime.now() - datetime.strptime("2026/01/1", "%Y/%m/%d")
+    b = int(time_diff.days)
+    all_date_dict = {}
+
+
+    for i in range(0, b):
+
+        date = (root_date + timedelta(days=i)).date()
+        temp_dict = {}
+        if (i + 3) % 7 == 0 and on_call_index < len(oncallEengineer):  # first on call ended at 4/1/2026, so i+3 if ended at 5/1/2026 then i+2
+            on_call_index += 1
+        if on_call_index >= len(oncallEengineer):
+            on_call_index = 0
+        On_call_Engineer = oncallEengineer[on_call_index]
+        temp_dict = {date: On_call_Engineer}
+        all_date_dict.update(temp_dict)
+        temp_dict.clear()
+
+    if all_date_dict.get(stripped_date_input) is not None:
+        temp_on_call_engineer = all_date_dict[stripped_date_input]
+        all_date_dict.clear()
+        return temp_on_call_engineer
+    else:
+        return None
+
+
+
+
 # ---------- Field parsing ----------
 def parse_fields(text):
     def grab(pattern, flags=re.IGNORECASE | re.MULTILINE):
@@ -212,6 +253,7 @@ def parse_fields(text):
         "maint_body_type": grab(
             r"Maint\s*Body\s*Type[^\n:：]*[:：]\s*([A-Z][A-Z/&\-]*)"
         ),
+        "On_call_Engineer": cal_oncall_engineer(extract_printed_date(text)),
     }
 
     if not data["maint_body_type"]:
@@ -220,6 +262,10 @@ def parse_fields(text):
         )
 
     return data
+
+
+
+
 
 
 # ---------- Excel writer ----------
@@ -247,9 +293,10 @@ def append_to_excel(data):
     ws.cell(row=next_row, column=9,  value=data["wo_type"])
     ws.cell(row=next_row, column=10, value=data["maint_contract_no"])
     ws.cell(row=next_row, column=11, value=data["maint_body_type"])
+    ws.cell(row=next_row, column=12, value=data["On_call_Engineer"])
 
     # --- Auto-fit column widths based on longest cell content ---
-    for col_idx in range(1, 12):  # columns A through K
+    for col_idx in range(1, 13):  # columns A through K
         letter = get_column_letter(col_idx)
         max_len = 0
         for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, values_only=True):
