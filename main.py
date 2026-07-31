@@ -15,9 +15,11 @@ PDF_FOLDER     = r"C:\Users\320163620\OneDrive - Philips\test1"
 EXCEL_PATH     = r"C:\Users\320163620\Desktop\py_wo\wo_excel\CM_WorkOrder.xlsx"
 PROCESSED_LOG  = r"C:\Users\320163620\Desktop\py_wo\processed.txt"
 PROCESSING_LOG = r"C:\Users\320163620\Desktop\py_wo\processing.txt"
+DELETED_LOG    = r"C:\Users\320163620\Desktop\py_wo\deleted.txt"   # <-- NEW
 
 CHECK_INTERVAL = 5 * 60   # 5 minutes
 DEBUG          = True     # Set False to silence preview output
+DELETE_AFTER_WRITE = True # <-- NEW  master switch for the delete feature
 
 # ---------- Queried time (set once at program start in main()) ----------
 QUERIED_TIME = None  # type: datetime | None
@@ -81,7 +83,6 @@ def extract_printed_date(text):
 
 
 # ---------- Column B: Location ----------
-# Tolerant patterns for the two labels (allow any whitespace/newlines inside)
 LBL_LOC   = r"Location\s*Institution\s*[/\\]\s*Block\s*[/\\]\s*Floor\s*[/\\]\s*Room"
 LBL_ASSET = r"Asset\s*Location\s*Description"
 
@@ -90,12 +91,8 @@ def extract_location(text):
     """
     Extract the hospital location code that sits between the labels
     'Location Institution/Block/Floor/Room' and 'Asset Location Description'.
-
-    Handles both possible orderings (the PDF/text extractor sometimes
-    reverses column order), then falls back to less-specific patterns.
     """
 
-    # 1a. Value BETWEEN  Location Institution/...  ->  Asset Location Description
     m = re.search(
         LBL_LOC + r"[\s:：]*(.*?)\s*" + LBL_ASSET,
         text, re.IGNORECASE | re.DOTALL,
@@ -105,8 +102,6 @@ def extract_location(text):
         if _looks_like_code(val):
             return val
 
-    # 1b. Value BETWEEN  Asset Location Description  ->  Location Institution/...
-    #     (handles the reversed-column case)
     m = re.search(
         LBL_ASSET + r"[\s:：]*(.*?)\s*" + LBL_LOC,
         text, re.IGNORECASE | re.DOTALL,
@@ -116,12 +111,10 @@ def extract_location(text):
         if _looks_like_code(val):
             return val
 
-    # 2. PMH-style code anywhere in the document
     m = re.search(r"(PMH[-\s][A-Z0-9\-/]+)", text, re.IGNORECASE)
     if m:
         return m.group(1).replace(" ", "-").strip()
 
-    # 3. Generic AAA-NN-... code
     m = re.search(
         r"\b([A-Z]{2,5}-[A-Z0-9]{1,6}-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,6})*)\b",
         text,
@@ -133,7 +126,6 @@ def extract_location(text):
 
 
 def _clean(val: str) -> str:
-    """Collapse whitespace and tidy spacing around dashes/slashes."""
     val = val.strip()
     val = re.sub(r"\s+", " ", val)
     val = re.sub(r"\s*-\s*", "-", val)
@@ -142,11 +134,6 @@ def _clean(val: str) -> str:
 
 
 def _looks_like_code(val: str) -> bool:
-    """
-    A location code should be short and contain a digit or a dash —
-    this prevents the regex from accidentally returning a paragraph
-    of unrelated text that happens to sit between the two labels.
-    """
     if not val:
         return False
     if len(val) > 60:
@@ -154,7 +141,7 @@ def _looks_like_code(val: str) -> bool:
     return bool(re.search(r"[\d\-]", val))
 
 
-# ---------- Column H: Description (NOT Standard Description) ----------
+# ---------- Column H: Description ----------
 def extract_description(text):
     m = re.search(r"詳細內容\s*[:：]\s*(.+)", text)
     if m:
@@ -174,7 +161,7 @@ def extract_description(text):
     return None
 
 
-# ---------- Column J: Maint Contract No. (digits + dashes only) ----------
+# ---------- Column J: Maint Contract No. ----------
 def extract_maint_contract_no(text):
     m = re.search(
         r"Maint\s*Contract\s*No\.?\s*[^\n:：]*[:：]\s*(\S+)",
@@ -195,22 +182,16 @@ def extract_maint_contract_no(text):
 def cal_oncall_engineer(date_input: datetime):
     oncallEengineer = ["Anson", "Joe", "Koster", "Zero"]
     on_call_index = 0
-    # if date.weekday() == 1:  # check if Monday
-    #     on_call_index += 1  # rotate to next engineer if Monday
-    # if on_call_index >= len(oncallEengineer):
-    #     on_call_index = 0
     root_date = datetime.strptime("2026/01/1", "%Y/%m/%d")
     stripped_date_input = date_input.date()
     time_diff = datetime.now() - datetime.strptime("2026/01/1", "%Y/%m/%d")
-    b = int(time_diff.days)
+    num_of_days = int(time_diff.days)
     all_date_dict = {}
 
-
-    for i in range(0, b):
-
+    for i in range(0, num_of_days):
         date = (root_date + timedelta(days=i)).date()
         temp_dict = {}
-        if (i + 3) % 7 == 0 and on_call_index < len(oncallEengineer):  # first on call ended at 4/1/2026, so i+3 if ended at 5/1/2026 then i+2
+        if (i + 3) % 7 == 0 and on_call_index < len(oncallEengineer):
             on_call_index += 1
         if on_call_index >= len(oncallEengineer):
             on_call_index = 0
@@ -225,8 +206,6 @@ def cal_oncall_engineer(date_input: datetime):
         return temp_on_call_engineer
     else:
         return None
-
-
 
 
 # ---------- Field parsing ----------
@@ -264,10 +243,6 @@ def parse_fields(text):
     return data
 
 
-
-
-
-
 # ---------- Excel writer ----------
 def append_to_excel(data):
     wb = load_workbook(EXCEL_PATH)
@@ -284,7 +259,6 @@ def append_to_excel(data):
     ws.cell(row=next_row, column=5,  value=data["model"])
     ws.cell(row=next_row, column=6,  value=data["asset_no"])
 
-    # Column G: real datetime + display format
     pd_cell = ws.cell(row=next_row, column=7, value=data["printed_date"])
     if isinstance(data["printed_date"], datetime):
         pd_cell.number_format = "yyyy/mm/dd hh:mm:ss"
@@ -295,8 +269,7 @@ def append_to_excel(data):
     ws.cell(row=next_row, column=11, value=data["maint_body_type"])
     ws.cell(row=next_row, column=12, value=data["On_call_Engineer"])
 
-    # --- Auto-fit column widths based on longest cell content ---
-    for col_idx in range(1, 13):  # columns A through K
+    for col_idx in range(1, 13):
         letter = get_column_letter(col_idx)
         max_len = 0
         for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, values_only=True):
@@ -304,7 +277,7 @@ def append_to_excel(data):
             if val is None:
                 continue
             if isinstance(val, datetime):
-                text_len = len("yyyy/mm/dd hh:mm:ss")  # = 19
+                text_len = len("yyyy/mm/dd hh:mm:ss")
             else:
                 text_len = len(str(val))
             if text_len > max_len:
@@ -334,11 +307,6 @@ def load_excel_work_orders():
 
 # ---------- Processed / Processing logs ----------
 def load_processed():
-    """
-    Returns a set of filenames already processed.
-    Accepts both new format ('filename.pdf | 2026/04/27 14:23:05')
-    and old format ('filename.pdf') for backward compatibility.
-    """
     if not os.path.exists(PROCESSED_LOG):
         return set()
     processed = set()
@@ -347,7 +315,6 @@ def load_processed():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            # New format: "filename | timestamp"  -> take the part before '|'
             name = line.split("|", 1)[0].strip()
             if name:
                 processed.add(name)
@@ -355,11 +322,6 @@ def load_processed():
 
 
 def mark_processed(filename):
-    """
-    Append a line of the form:
-        filename.pdf | 2026/04/27 14:23:05
-    where the timestamp is the queried time of this program run.
-    """
     qt_str = (
         QUERIED_TIME.strftime("%Y/%m/%d %H:%M:%S")
         if isinstance(QUERIED_TIME, datetime)
@@ -379,6 +341,55 @@ def write_processing_log(pending_files):
                 f.write(item + "\n")
         else:
             f.write("# (none – all PDFs processed)\n")
+
+
+# ---------- NEW: Delete the PDF and log the deletion ----------
+def log_deletion(filename: str, status: str, reason: str = ""):
+    """
+    Append a deletion record to DELETED_LOG.
+
+    Format:
+        filename.pdf | 2026/04/27 14:23:05 | OK
+        filename.pdf | 2026/04/27 14:23:05 | FAIL | <reason>
+    """
+    ts = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    line = f"{filename} | {ts} | {status}"
+    if reason:
+        line += f" | {reason}"
+    try:
+        with open(DELETED_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        print(f"    [WARN] Could not write to delete log: {e}")
+
+
+def delete_pdf(pdf_path: str) -> bool:
+    """
+    Delete the given PDF file and record the outcome in DELETED_LOG.
+    Returns True on success, False on failure.
+    """
+    filename = os.path.basename(pdf_path)
+    if not DELETE_AFTER_WRITE:
+        return False
+
+    try:
+        if not os.path.exists(pdf_path):
+            print(f"    [DEL-SKIP] {filename} no longer exists.")
+            log_deletion(filename, "SKIP", "file not found")
+            return False
+
+        os.remove(pdf_path)
+        print(f"    [DEL-OK] {filename} deleted after Excel write.")
+        log_deletion(filename, "OK")
+        return True
+    except PermissionError as e:
+        print(f"    [DEL-FAIL] {filename}: file is locked ({e}).")
+        log_deletion(filename, "FAIL", f"PermissionError: {e}")
+        return False
+    except OSError as e:
+        print(f"    [DEL-FAIL] {filename}: {e}")
+        log_deletion(filename, "FAIL", f"OSError: {e}")
+        return False
 
 
 # ---------- File-ready check ----------
@@ -401,13 +412,6 @@ def process_pdf(pdf_path, excel_wos):
             return False
 
         text = extract_pdf_text(pdf_path)
-
-        # if DEBUG:
-        #     print("    ---------- Extracted text (preview) ----------")
-        #     for line in text.splitlines():
-        #         print(f"      {line}")
-        #     print("    -----------------------------------------------")
-
         data = parse_fields(text)
 
         if DEBUG:
@@ -420,12 +424,17 @@ def process_pdf(pdf_path, excel_wos):
         if wo and wo in excel_wos:
             print(f"    [SKIP] WO {wo} already exists in Excel — marking as processed.")
             mark_processed(filename)
+            # Duplicate WO still deletes the PDF so the folder stays clean
+            delete_pdf(pdf_path)                                   # <-- NEW
             return True
 
         append_to_excel(data)
         mark_processed(filename)
         if wo:
             excel_wos.add(wo)
+
+        # Only delete after a confirmed successful Excel write
+        delete_pdf(pdf_path)                                       # <-- NEW
         return True
     except Exception as e:
         print(f"    [ERROR] {filename}: {e}\n")
@@ -453,6 +462,7 @@ def compute_pending(all_pdfs, processed_set, excel_wos):
                 if wo and wo in excel_wos:
                     print(f"    [AUTO] {f} (WO {wo}) already in Excel — marking processed.")
                     mark_processed(f)
+                    delete_pdf(full_path)                          # <-- NEW
                     wo_in_excel = True
         except Exception as e:
             print(f"    [WARN] Could not peek {f}: {e}")
@@ -490,9 +500,12 @@ def process_all_pending():
         process_pdf(full_path, excel_wos)
 
     processed = load_processed()
-    all_pdfs = sorted(
-        f for f in os.listdir(PDF_FOLDER) if f.lower().endswith(".pdf")
-    )
+    try:
+        all_pdfs = sorted(
+            f for f in os.listdir(PDF_FOLDER) if f.lower().endswith(".pdf")
+        )
+    except FileNotFoundError:
+        all_pdfs = []
     remaining = [f for f in all_pdfs if f not in processed]
     write_processing_log(remaining)
 
@@ -500,11 +513,11 @@ def process_all_pending():
 # ---------- Main loop ----------
 def main():
     global QUERIED_TIME
-    QUERIED_TIME = datetime.now()  # set once at program start
+    QUERIED_TIME = datetime.now()
 
     os.makedirs(PDF_FOLDER, exist_ok=True)
     os.makedirs(os.path.dirname(EXCEL_PATH), exist_ok=True)
-    for p in (PROCESSED_LOG, PROCESSING_LOG):
+    for p in (PROCESSED_LOG, PROCESSING_LOG, DELETED_LOG):          # <-- NEW: DELETED_LOG added
         if not os.path.exists(p):
             open(p, "w", encoding="utf-8").close()
 
@@ -513,7 +526,8 @@ def main():
     print(f"Writing to      : {EXCEL_PATH}")
     print(f"Processed log   : {PROCESSED_LOG}")
     print(f"Processing log  : {PROCESSING_LOG}")
-    #print(f"Check interval  : every {CHECK_INTERVAL // 60} minute(s)")
+    print(f"Deleted log     : {DELETED_LOG}")                       # <-- NEW
+    print(f"Delete after OK : {DELETE_AFTER_WRITE}")                # <-- NEW
     print(f"Queried time    : {QUERIED_TIME.strftime('%Y/%m/%d %H:%M:%S')}\n")
 
     try:
