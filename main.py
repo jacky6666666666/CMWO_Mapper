@@ -11,11 +11,14 @@ from openpyxl.utils import get_column_letter
 # EXCEL_PATH     = r"C:\Users\310221754\Desktop\py_wo\wo_excel\CM_WorkOrder.xlsx"
 # PROCESSED_LOG  = r"C:\Users\310221754\Desktop\py_wo\processed.txt"
 # PROCESSING_LOG = r"C:\Users\310221754\Desktop\py_wo\processing.txt"
+
+
+DELETED_LOG    = r"C:\Users\320163620\Desktop\py_wo\deleted.txt"   # <-- NEW
 PDF_FOLDER     = r"C:\Users\320163620\OneDrive - Philips\test1"
 EXCEL_PATH     = r"C:\Users\320163620\Desktop\py_wo\wo_excel\CM_WorkOrder.xlsx"
 PROCESSED_LOG  = r"C:\Users\320163620\Desktop\py_wo\processed.txt"
 PROCESSING_LOG = r"C:\Users\320163620\Desktop\py_wo\processing.txt"
-DELETED_LOG    = r"C:\Users\320163620\Desktop\py_wo\deleted.txt"   # <-- NEW
+
 
 CHECK_INTERVAL = 5 * 60   # 5 minutes
 DEBUG          = True     # Set False to silence preview output
@@ -180,7 +183,7 @@ def extract_maint_contract_no(text):
 
 
 def cal_oncall_engineer(date_input: datetime):
-    oncallEengineer = ["Anson", "Joe", "Koster", "Zero"]
+    oncallEengineer = ["Shelly", "Derick", "Jack"]
     on_call_index = 0
     root_date = datetime.strptime("2026/01/1", "%Y/%m/%d")
     stripped_date_input = date_input.date()
